@@ -2,6 +2,15 @@
   "name": "opencode-analyze-image",
   "version": "0.1.0",
   "description": "OpenCode plugin that lets text-only models analyze image attachments, URLs, files, and directories through an auxiliary vision model.",
+  "author": "cipherTing",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cipherTing/opencode-analyze-image.git"
+  },
+  "homepage": "https://github.com/cipherTing/opencode-analyze-image#readme",
+  "bugs": {
+    "url": "https://github.com/cipherTing/opencode-analyze-image/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -12,6 +21,7 @@
     "dist",
     "config.example.json",
     "README.md",
+    "docs",
     "LICENSE"
   ],
   "scripts": {
@@ -20,11 +30,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run build && npm test",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
-    "@opencode-ai/plugin": "^1.18.13",
+    "@opencode-ai/plugin": "^1.18.14",
     "openai": "^7.4.0"
   },
   "devDependencies": {
@@ -35,7 +46,7 @@
   },
   "engines": {
     "node": ">=20",
-    "opencode": ">=1.18.13"
+    "opencode": ">=1.18.14"
   },
   "keywords": [
     "opencode",

@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises"
 import { constants } from "node:fs"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import type { AnalyzeImageConfig, ApiFormat } from "./types.js"
 
@@ -41,6 +41,36 @@ function stringValue(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback
 }
 
+async function resolveApiKey(value: unknown, configPath: string): Promise<string> {
+  const reference = stringValue(value, "").trim()
+  const environment = /^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(reference)
+  if (environment) {
+    const result = process.env[environment[1]]?.trim() ?? ""
+    if (!result) throw new Error(`api_key environment variable ${environment[1]} is not set`)
+    return result
+  }
+
+  const file = /^\{file:(.+)\}$/.exec(reference)
+  if (file) {
+    const configuredPath = expandHome(file[1].trim())
+    const secretPath = isAbsolute(configuredPath)
+      ? configuredPath
+      : resolve(dirname(configPath), configuredPath)
+    let result: string
+    try {
+      result = (await readFile(secretPath, "utf8")).trim()
+    } catch (error) {
+      throw new Error(
+        `Cannot read api_key file ${secretPath}: ${error instanceof Error ? error.message : error}`,
+      )
+    }
+    if (!result) throw new Error(`api_key file ${secretPath} is empty`)
+    return result
+  }
+
+  return reference
+}
+
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback
 }
@@ -73,6 +103,13 @@ function expandHome(path: string): string {
   return path
 }
 
+function openCodeConfigDirectory(): string {
+  const configured = process.env.OPENCODE_CONFIG_DIR
+  return configured
+    ? resolve(expandHome(configured))
+    : join(homedir(), ".config", "opencode")
+}
+
 export function configCandidates(directory: string, worktree: string): string[] {
   const explicit = process.env.ANALYZE_IMAGE_CONFIG
   const candidates = [
@@ -81,7 +118,7 @@ export function configCandidates(directory: string, worktree: string): string[] 
     worktree && worktree !== directory
       ? join(worktree, ".opencode", "analyze_image", "config.json")
       : undefined,
-    join(homedir(), ".config", "opencode", "analyze_image", "config.json"),
+    join(openCodeConfigDirectory(), "analyze_image", "config.json"),
   ]
   return [...new Set(candidates.filter((item): item is string => Boolean(item)))]
 }
@@ -93,8 +130,8 @@ export async function findConfigPath(directory: string, worktree: string): Promi
   return undefined
 }
 
-export function expectedConfigPath(directory: string): string {
-  return join(directory, ".opencode", "analyze_image", "config.json")
+export function expectedConfigPath(): string {
+  return join(openCodeConfigDirectory(), "analyze_image", "config.json")
 }
 
 export async function loadConfigFile(path: string): Promise<AnalyzeImageConfig> {
@@ -118,7 +155,7 @@ export async function loadConfigFile(path: string): Promise<AnalyzeImageConfig> 
     api_format: apiFormat as ApiFormat,
     base_url: stringValue(root.base_url, DEFAULT_CONFIG.base_url).replace(/\/$/, ""),
     model: stringValue(root.model, DEFAULT_CONFIG.model),
-    api_key: stringValue(root.api_key, DEFAULT_CONFIG.api_key).trim(),
+    api_key: await resolveApiKey(root.api_key, path),
     timeout_seconds: numberValue(root.timeout_seconds, DEFAULT_CONFIG.timeout_seconds),
     max_retries: numberValue(root.max_retries, DEFAULT_CONFIG.max_retries),
     max_output_tokens: numberValue(root.max_output_tokens, DEFAULT_CONFIG.max_output_tokens),

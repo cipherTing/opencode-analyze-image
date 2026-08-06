@@ -1,49 +1,38 @@
 # opencode-analyze-image
 
-让 OpenCode 中的文本模型获得图片理解能力。
+[English](README.md) | [简体中文](docs/README_CN.md)
 
-配置完成后，正常使用 OpenCode 即可。当模型需要识别图片时，会使用 `analyze_image`，并将结果返回到当前对话。
+> This is an independent community project. It is not built by or affiliated with the OpenCode team.
 
-## 安装
+Give text-only models in OpenCode the ability to understand images.
 
-### 未发布版本
+After configuration, use OpenCode normally. When the model needs to inspect an image, it can call `analyze_image` and receive the result in the current conversation.
 
-在插件源码目录执行：
+## Usage
+
+Run the following commands from the plugin source directory:
 
 ```bash
+cd /path/to/opencode-analyze-image
 npm install
-npm run install:local
+npm run install:local ~/.config/opencode
 ```
 
-该命令会将本地插件入口安装到当前目录的 `.opencode/plugins/` 中。
+After installation, use OpenCode normally. When the model needs to inspect an image, it can call `analyze_image` and return the result to the current conversation.
 
-### 已发布版本
+When no path is provided, the installer defaults to `~/.config/opencode`. To use another OpenCode root directory, pass its path as the argument to `npm run install:local`.
 
-将插件包加入现有 OpenCode 配置的 `plugin` 列表：
+## Configuration
 
-```json
-{
-  "plugin": [
-    "opencode-analyze-image"
-  ]
-}
-```
-
-## 配置
-
-项目配置文件：
-
-```text
-.opencode/analyze_image/config.json
-```
-
-也可以使用全局配置：
+Configuration file:
 
 ```text
 ~/.config/opencode/analyze_image/config.json
 ```
 
-最小配置示例：
+When `OPENCODE_CONFIG_DIR` is set, use `$OPENCODE_CONFIG_DIR/analyze_image/config.json` instead.
+
+Minimal configuration:
 
 ```json
 {
@@ -57,32 +46,48 @@ npm run install:local
 }
 ```
 
-### 必填字段
+### Required fields
 
-| 字段 | 说明 |
+| Field | Description |
 | --- | --- |
-| `trigger_models` | 允许使用插件的主模型列表，填写完整的 `provider/model`。 |
-| `api_format` | 接口格式，可选 `openai_chat`、`openai_responses`、`anthropic_messages`。 |
-| `base_url` | 视觉模型接口地址。 |
-| `model` | 视觉模型 ID。 |
-| `api_key` | 视觉模型 API Key。 |
+| `trigger_models` | Primary models that can use the plugin. Use the full `provider/model` identifier. |
+| `api_format` | API format: `openai_chat`, `openai_responses`, or `anthropic_messages`. |
+| `base_url` | Vision model API endpoint. |
+| `model` | Vision model ID. |
+| `api_key` | Vision model API key, or an `{env:NAME}` / `{file:PATH}` reference. |
 
-`trigger_models` 使用精确匹配。模型 ID 自身包含斜杠时，保留完整名称即可。
+The API key can be written directly, read from an environment variable, or read from a file:
 
-### 可选字段
+```json
+"api_key": "your-api-key"
+```
 
-| 字段 | 默认值 | 说明 |
+```json
+"api_key": "{env:ANALYZE_IMAGE_API_KEY}"
+```
+
+```json
+"api_key": "{file:~/.secrets/analyze-image-key}"
+```
+
+Relative file paths are resolved relative to `config.json`.
+
+`trigger_models` uses exact matching. Keep the complete identifier when a model ID contains additional slashes.
+
+### Optional fields
+
+| Field | Default | Description |
 | --- | ---: | --- |
-| `timeout_seconds` | `120` | 请求超时时间。 |
-| `max_retries` | `2` | 请求重试次数。 |
-| `max_output_tokens` | `4096` | 最大输出长度。 |
+| `timeout_seconds` | `120` | Request timeout. |
+| `max_retries` | `2` | Number of request retries. |
+| `max_output_tokens` | `4096` | Maximum output length. |
 
-图片相关限制配置可以直接沿用 `config.example.json` 中的默认值，只有需要调整时再修改 `image` 节点。
+Image size and directory limits can use the defaults in [config.example.json](./config.example.json). Change the `image` section only when needed.
 
-## 完整配置
+## Full configuration
 
-完整字段清单见 [config.example.json](./config.example.json)。
+See [config.example.json](./config.example.json) for the complete field list.
 
-## 许可证
+## License
 
 MIT

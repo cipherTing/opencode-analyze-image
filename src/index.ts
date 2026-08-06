@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { isAbsolute, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { tool, type Hooks, type PluginInput } from "@opencode-ai/plugin"
+import { tool, type Hooks, type PluginInput, type PluginModule } from "@opencode-ai/plugin"
 
 import {
   AttachmentResolutionError,
@@ -85,7 +85,7 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
             throw toolError(
               new AnalyzeImageError(
                 "missing_config",
-                `Create ${expectedConfigPath(context.directory)} from config.example.json.`,
+                `Create ${expectedConfigPath()} from config.example.json.`,
               ),
             )
           }
@@ -204,7 +204,9 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
   }
 }
 
-export default {
+const plugin: PluginModule = {
   id: "analyze_image",
   server: createHooks,
 }
+
+export default plugin
