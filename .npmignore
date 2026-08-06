@@ -1,0 +1,8 @@
+python/tests/
+**/__pycache__/
+*.pyc
+.opencode/
+tests/
+src/
+node_modules/
+.venv/

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "trigger_models": [
+    "deepseek/deepseek-v4-flash"
+  ],
+  "api_format": "openai_chat",
+  "base_url": "https://api.openai.com/v1",
+  "model": "gpt-5.6",
+  "api_key_env": "OPENAI_API_KEY",
+  "timeout_seconds": 120,
+  "max_retries": 2,
+  "max_output_tokens": 4096,
+  "temperature": null,
+  "openai_chat": {
+    "max_tokens_parameter": "max_tokens"
+  },
+  "prompt": {
+    "template": "Fully describe and explain everything visible in this image. Include visible text, people, objects, layout, colors, spatial relationships, important details, and any uncertainty."
+  },
+  "image": {
+    "allow_remote_url": true,
+    "allow_private_network": false,
+    "max_source_bytes": 26214400,
+    "max_total_source_bytes": 52428800,
+    "max_image_bytes": 10485760,
+    "max_total_image_bytes": 26214400,
+    "max_total_pixels": 80000000,
+    "max_dimension": 8000,
+    "resize_target": 2048,
+    "directory_max_images": 10,
+    "directory_recursive": true,
+    "detail": "auto"
+  },
+  "runtime": {
+    "python_command": "python3",
+    "python_args": [],
+    "cache_ttl_minutes": 1440,
+    "worker_timeout_seconds": 150
+  }
+}
