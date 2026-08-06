@@ -1,9 +1,6 @@
 dist/
 node_modules/
-.venv/
 .opencode/
-__pycache__/
-*.pyc
 *.log
 *.tgz
 .env

@@ -7,15 +7,13 @@ import { tool, type Hooks, type PluginInput } from "@opencode-ai/plugin"
 
 import {
   AttachmentResolutionError,
-  cacheRoot,
-  cleanupStaleCache,
-  isManagedCachePath,
   prepareImageReferences,
   resolveSessionImageParts,
   resolveToolInvocation,
 } from "./attachments.js"
 import { expectedConfigPath, findConfigPath, loadConfigFile } from "./config.js"
-import { runWorker } from "./runner.js"
+import { AnalyzeImageError } from "./errors.js"
+import { runAnalysis } from "./runner.js"
 
 function expandHome(value: string): string {
   if (value === "~") return homedir()
@@ -55,11 +53,12 @@ async function permissionPath(value: string, directory: string): Promise<string 
   }
 }
 
-function attachmentError(error: unknown): string {
-  if (error instanceof AttachmentResolutionError) {
-    return `Image analysis failed [${error.code}]: ${error.message}`
-  }
-  return `Image analysis failed [attachment_resolution_failed]: ${error instanceof Error ? error.message : error}`
+function toolError(error: unknown, fallbackCode = "analysis_failed"): Error {
+  const code = error instanceof AnalyzeImageError || error instanceof AttachmentResolutionError ? error.code : fallbackCode
+  const message = error instanceof Error ? error.message : String(error)
+  const result = new Error(`Image analysis failed [${code}]: ${message}`)
+  result.name = "AnalyzeImageError"
+  return result
 }
 
 async function createHooks(input: PluginInput): Promise<Hooks> {
@@ -83,25 +82,35 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
         async execute(args, context) {
           const configPath = await findConfigPath(context.directory, context.worktree)
           if (!configPath) {
-            return `Image analysis failed [missing_config]: Create ${expectedConfigPath(context.directory)} from config.example.json.`
+            throw toolError(
+              new AnalyzeImageError(
+                "missing_config",
+                `Create ${expectedConfigPath(context.directory)} from config.example.json.`,
+              ),
+            )
           }
 
           let config
           try {
             config = await loadConfigFile(configPath)
           } catch (error) {
-            return `Image analysis failed [invalid_config]: ${error instanceof Error ? error.message : error}`
+            throw toolError(error, "invalid_config")
           }
 
           let invocation
           try {
             invocation = await resolveToolInvocation(input.client, context.directory, context.sessionID, context.messageID)
           } catch (error) {
-            return attachmentError(error)
+            throw toolError(error, "attachment_resolution_failed")
           }
 
           if (!config.trigger_models.includes(invocation.modelKey)) {
-            return `Image analysis failed [disabled_for_model]: Model ${invocation.modelKey} is not listed in trigger_models.`
+            throw toolError(
+              new AnalyzeImageError(
+                "disabled_for_model",
+                `Model ${invocation.modelKey} is not listed in trigger_models.`,
+              ),
+            )
           }
 
           if (await isProjectConfigPath(configPath, context.directory, context.worktree)) {
@@ -110,7 +119,7 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
               patterns: [configPath],
               always: [configPath],
               metadata: {
-                reason: `Use project analyze_image config to run ${config.runtime.python_command} and send images to ${config.base_url} using ${config.api_key_env}.`,
+                reason: `Use project analyze_image config and send images to ${config.base_url} using the configured API key.`,
               },
             })
           }
@@ -120,13 +129,16 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
             worktree: context.worktree,
             config,
           }
-          const root = cacheRoot(attachmentContext)
-          await cleanupStaleCache(root, config.runtime.cache_ttl_minutes)
 
           let references: string[]
           if (args.image_url) {
             if (args.image_url.startsWith("data:")) {
-              return "Image analysis failed [data_url_argument_blocked]: Do not pass image base64 through tool arguments. Omit image_url to use the current session attachment."
+              throw toolError(
+                new AnalyzeImageError(
+                  "data_url_argument_blocked",
+                  "Do not pass image base64 through tool arguments. Omit image_url to use the current session attachment.",
+                ),
+              )
             }
             references = [args.image_url]
           } else {
@@ -139,7 +151,7 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
               )
               references = await prepareImageReferences(parts, attachmentContext)
             } catch (error) {
-              return attachmentError(error)
+              throw toolError(error, "attachment_resolution_failed")
             }
           }
 
@@ -149,9 +161,7 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
           const realWorktree = await realpath(context.worktree).catch(() => resolve(context.worktree))
           const externalPaths = [
             ...new Set(
-              permissionPaths.filter(
-                (path) => isOutside(path, realWorktree) && !isManagedCachePath(path, root),
-              ),
+              permissionPaths.filter((path) => isOutside(path, realWorktree)),
             ),
           ]
           if (externalPaths.length) {
@@ -175,24 +185,19 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
             },
           })
 
-          const result = await runWorker({
-            config,
-            configPath,
-            directory: context.directory,
-            request: {
-              image_urls: references,
-              instruction: args.instruction,
-              cwd: context.directory,
-            },
-            signal: context.abort,
-          })
-
-          if (!result.success) {
-            return `Image analysis failed [${result.error.code}]: ${result.error.message}`
+          try {
+            return await runAnalysis({
+              config,
+              request: {
+                image_urls: references,
+                instruction: args.instruction,
+                cwd: context.directory,
+                signal: context.abort,
+              },
+            })
+          } catch (error) {
+            throw toolError(error)
           }
-
-          // The public tool contract is plain text; JSON is only the private worker IPC envelope.
-          return result.analysis
         },
       }),
     },

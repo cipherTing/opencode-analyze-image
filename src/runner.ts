@@ -1,188 +1,291 @@
-import { spawn } from "node:child_process"
-import { isAbsolute } from "node:path"
-import { fileURLToPath } from "node:url"
+import Anthropic from "@anthropic-ai/sdk"
+import OpenAI from "openai"
 
-import { resolveConfiguredPath } from "./config.js"
-import type { AnalyzeImageConfig, WorkerRequest, WorkerResult } from "./types.js"
+import { AnalyzeImageError } from "./errors.js"
+import { prepareVisionImages, type PreparedImage } from "./vision.js"
+import type { AnalyzeImageConfig, AnalyzeImageRequest } from "./types.js"
 
-const MAX_WORKER_OUTPUT_BYTES = 2 * 1024 * 1024
+const DEFAULT_PROMPT =
+  "Fully describe and explain everything visible in this image. Include visible text, people, objects, layout, colors, spatial relationships, important details, and any uncertainty."
 
-export function parseWorkerResult(value: unknown): WorkerResult {
-  if (!value || typeof value !== "object") {
-    throw new Error("Python worker returned a non-object response.")
-  }
-
-  const result = value as Record<string, unknown>
-  if (result.success === true) {
-    if (typeof result.analysis !== "string") {
-      throw new Error("Python worker success response must contain text analysis.")
-    }
-    return {
-      success: true,
-      analysis: result.analysis,
-    }
-  }
-
-  if (result.success === false) {
-    const error = result.error
-    if (
-      error &&
-      typeof error === "object" &&
-      typeof (error as Record<string, unknown>).code === "string" &&
-      typeof (error as Record<string, unknown>).message === "string"
-    ) {
-      return {
-        success: false,
-        error: {
-          code: (error as Record<string, unknown>).code as string,
-          message: (error as Record<string, unknown>).message as string,
-        },
-      }
-    }
-    throw new Error("Python worker failure response must contain an error code and message.")
-  }
-
-  throw new Error("Python worker returned an invalid response.")
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 }
 
-function environmentNames(config: AnalyzeImageConfig): Set<string> {
-  const names = new Set([
-    "PATH",
-    "Path",
-    "HOME",
-    "USERPROFILE",
-    "SYSTEMROOT",
-    "SystemRoot",
-    "WINDIR",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "VIRTUAL_ENV",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "NO_PROXY",
-    "SSL_CERT_FILE",
-    "REQUESTS_CA_BUNDLE",
-  ])
-  names.add(config.api_key_env)
-  const pattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g
-  for (const value of Object.values(config.headers)) {
-    for (const match of value.matchAll(pattern)) names.add(match[1] || match[2])
-  }
-  return names
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : ""
 }
 
-function workerEnvironment(config: AnalyzeImageConfig): NodeJS.ProcessEnv {
-  const names = environmentNames(config)
-  return Object.fromEntries(
-    [...names]
-      .filter((name) => process.env[name] !== undefined)
-      .map((name) => [name, process.env[name]]),
+function textBlocks(value: unknown): string {
+  if (typeof value === "string") return value.trim()
+  if (!Array.isArray(value)) return ""
+
+  const chunks: string[] = []
+  for (const item of value) {
+    const block = record(item)
+    const type = textValue(block.type)
+    if (type === "text" || type === "output_text") {
+      const text = textValue(block.text)
+      if (text) chunks.push(text)
+      continue
+    }
+    const text = textValue(block.text)
+    if (text) chunks.push(text)
+  }
+  return chunks.join("\n").trim()
+}
+
+function reasoningText(value: unknown): string {
+  if (typeof value === "string") return value.trim()
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        const block = record(item)
+        return (
+          textValue(block.thinking) ||
+          textValue(block.text) ||
+          textBlocks(block.summary)
+        )
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim()
+  }
+  const object = record(value)
+  return textValue(object.text) || textBlocks(object.summary)
+}
+
+export function extractChatAnalysis(value: unknown): string {
+  const response = record(value)
+  const choices = Array.isArray(response.choices) ? response.choices : []
+  const message = record(record(choices[0]).message)
+  const content = textBlocks(message.content)
+  if (content) return content
+
+  for (const key of ["reasoning_content", "reasoning", "thinking"]) {
+    const reasoning = reasoningText(message[key])
+    if (reasoning) return reasoning
+  }
+  const extra = record(message.model_extra)
+  for (const key of ["reasoning_content", "reasoning", "thinking"]) {
+    const reasoning = reasoningText(extra[key])
+    if (reasoning) return reasoning
+  }
+  throw new AnalyzeImageError("empty_response", "The OpenAI chat response contained no text or reasoning.")
+}
+
+export function extractResponsesAnalysis(value: unknown): string {
+  const response = record(value)
+  const outputText = textValue(response.output_text)
+  if (outputText) return outputText
+
+  const reasoning: string[] = []
+  for (const item of Array.isArray(response.output) ? response.output : []) {
+    const block = record(item)
+    if (block.type === "message") {
+      const text = textBlocks(block.content)
+      if (text) return text
+    }
+    if (block.type === "reasoning") {
+      const text = reasoningText(block)
+      if (text) reasoning.push(text)
+    }
+  }
+  if (reasoning.length) return reasoning.join("\n")
+
+  const extra = record(response.model_extra)
+  for (const key of ["reasoning_content", "reasoning", "thinking"]) {
+    const text = reasoningText(extra[key])
+    if (text) return text
+  }
+  throw new AnalyzeImageError("empty_response", "The OpenAI Responses result contained no text or reasoning.")
+}
+
+export function extractAnthropicAnalysis(value: unknown): string {
+  const response = record(value)
+  const visible: string[] = []
+  const reasoning: string[] = []
+  for (const item of Array.isArray(response.content) ? response.content : []) {
+    const block = record(item)
+    if (block.type === "text") {
+      const text = textValue(block.text)
+      if (text) visible.push(text)
+    } else if (block.type === "thinking" || block.type === "reasoning") {
+      const text = reasoningText(block)
+      if (text) reasoning.push(text)
+    }
+  }
+  if (visible.length) return visible.join("\n")
+  if (reasoning.length) return reasoning.join("\n")
+  throw new AnalyzeImageError("empty_response", "The Anthropic response contained no text or reasoning.")
+}
+
+function apiKey(config: AnalyzeImageConfig): string {
+  if (!config.api_key) throw new AnalyzeImageError("missing_api_key", "api_key is empty in analyze_image config.")
+  return config.api_key
+}
+
+function imagePrompt(instruction: string | undefined, images: PreparedImage[]): string {
+  const focus = instruction?.trim() ?? ""
+  let prompt = DEFAULT_PROMPT
+  if (focus) prompt += `\n\nPay particular attention to the following request:\n${focus}`
+  if (images.length > 1) {
+    const names = images.map((image, index) => `- Image ${index + 1}: ${image.name}`).join("\n")
+    prompt = `The following images were provided:\n${names}\n\n${prompt}`
+  }
+  return prompt
+}
+
+function imageUrl(image: PreparedImage): string {
+  if (image.source.kind === "url") return image.source.url
+  return `data:${image.mime};base64,${image.source.data.toString("base64")}`
+}
+
+function anthropicImage(image: PreparedImage): Record<string, unknown> {
+  if (image.source.kind === "url") {
+    return { type: "image", source: { type: "url", url: image.source.url } }
+  }
+  return {
+    type: "image",
+    source: {
+      type: "base64",
+      media_type: image.mime,
+      data: image.source.data.toString("base64"),
+    },
+  }
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+function unsupportedChatTokenParameter(error: unknown): boolean {
+  const object = record(error)
+  const status = typeof object.status === "number" ? object.status : undefined
+  const message = errorText(error)
+  return (
+    (status === undefined || status === 400 || status === 422) &&
+    /(max_completion_tokens|max_tokens|unknown parameter|unsupported parameter|unrecognized request argument)/i.test(message)
   )
 }
 
-export interface WorkerRunOptions {
+async function openAIChat(
+  client: OpenAI,
+  config: AnalyzeImageConfig,
+  images: PreparedImage[],
+  prompt: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const content = [
+    { type: "text", text: prompt },
+    ...images.flatMap((image, index) => [
+      ...(images.length > 1 ? [{ type: "text", text: `Image ${index + 1}: ${image.name}` }] : []),
+      { type: "image_url", image_url: { url: imageUrl(image) } },
+    ]),
+  ]
+  const base = {
+    model: config.model,
+    messages: [{ role: "user", content }],
+  }
+
+  try {
+    const response = await client.chat.completions.create(
+      { ...base, max_completion_tokens: config.max_output_tokens } as never,
+      { signal },
+    )
+    return extractChatAnalysis(response)
+  } catch (error) {
+    if (!unsupportedChatTokenParameter(error)) throw error
+    const response = await client.chat.completions.create(
+      { ...base, max_tokens: config.max_output_tokens } as never,
+      { signal },
+    )
+    return extractChatAnalysis(response)
+  }
+}
+
+async function openAIResponses(
+  client: OpenAI,
+  config: AnalyzeImageConfig,
+  images: PreparedImage[],
+  prompt: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const content = [
+    { type: "input_text", text: prompt },
+    ...images.map((image) => ({ type: "input_image", image_url: imageUrl(image) })),
+  ]
+  const response = await client.responses.create(
+    {
+      model: config.model,
+      input: [{ role: "user", content }],
+      max_output_tokens: config.max_output_tokens,
+    } as never,
+    { signal },
+  )
+  return extractResponsesAnalysis(response)
+}
+
+async function anthropicMessages(
+  client: Anthropic,
+  config: AnalyzeImageConfig,
+  images: PreparedImage[],
+  prompt: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const content = [
+    ...images.flatMap((image, index) => [
+      ...(images.length > 1 ? [{ type: "text", text: `Image ${index + 1}: ${image.name}` }] : []),
+      anthropicImage(image),
+    ]),
+    { type: "text", text: prompt },
+  ]
+  const response = await client.messages.create(
+    {
+      model: config.model,
+      max_tokens: config.max_output_tokens,
+      messages: [{ role: "user", content }],
+    } as never,
+    { signal },
+  )
+  return extractAnthropicAnalysis(response)
+}
+
+export async function runAnalysis(options: {
   config: AnalyzeImageConfig
-  configPath: string
-  directory: string
-  request: WorkerRequest
-  signal: AbortSignal
-}
+  request: AnalyzeImageRequest
+}): Promise<string> {
+  const { config, request } = options
+  if (request.signal.aborted) throw new AnalyzeImageError("aborted", "Image analysis was cancelled.")
 
-function workerPath(): string {
-  return fileURLToPath(new URL("../python/analyze_image.py", import.meta.url))
-}
+  const images = await prepareVisionImages(request.image_urls, request.cwd, config)
+  const prompt = imagePrompt(request.instruction, images)
+  const key = apiKey(config)
 
-function isConfiguredPath(value: string): boolean {
-  return isAbsolute(value) || value.includes("/") || value.includes("\\") || value.startsWith(".") || value.startsWith("~")
-}
-
-export async function runWorker(options: WorkerRunOptions): Promise<WorkerResult> {
-  const pythonCommand = resolveConfiguredPath(options.config.runtime.python_command, options.directory)
-  const command = isConfiguredPath(options.config.runtime.python_command)
-    ? pythonCommand
-    : options.config.runtime.python_command
-  const args = [...options.config.runtime.python_args, workerPath(), "--config", options.configPath]
-
-  return new Promise<WorkerResult>((resolveResult) => {
-    const child = spawn(command, args, {
-      cwd: options.directory,
-      env: workerEnvironment(options.config),
-      stdio: ["pipe", "pipe", "pipe"],
-    })
-
-    let stdout = ""
-    let stderr = ""
-    let settled = false
-
-    const finish = (result: WorkerResult) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      options.signal.removeEventListener("abort", abort)
-      resolveResult(result)
-    }
-
-    const fail = (code: string, message: string) =>
-      finish({
-        success: false,
-        error: { code, message },
+  try {
+    if (config.api_format === "openai_chat" || config.api_format === "openai_responses") {
+      const client = new OpenAI({
+        apiKey: key,
+        baseURL: config.base_url,
+        timeout: config.timeout_seconds * 1000,
+        maxRetries: config.max_retries,
       })
-
-    const terminate = () => {
-      child.kill("SIGTERM")
-      const force = setTimeout(() => child.kill("SIGKILL"), 1000)
-      force.unref()
+      return config.api_format === "openai_chat"
+        ? await openAIChat(client, config, images, prompt, request.signal)
+        : await openAIResponses(client, config, images, prompt, request.signal)
     }
 
-    const abort = () => {
-      terminate()
-      fail("aborted", "Image analysis was cancelled.")
-    }
-
-    const timeout = setTimeout(() => {
-      terminate()
-      fail(
-        "worker_timeout",
-        `Image analysis exceeded ${options.config.runtime.worker_timeout_seconds} seconds.`,
-      )
-    }, Math.max(options.config.runtime.worker_timeout_seconds, 1) * 1000)
-
-    options.signal.addEventListener("abort", abort, { once: true })
-
-    child.on("error", (error) => {
-      fail("python_start_failed", `Cannot start ${command}: ${error.message}`)
+    const client = new Anthropic({
+      apiKey: key,
+      baseURL: config.base_url,
+      timeout: config.timeout_seconds * 1000,
+      maxRetries: config.max_retries,
     })
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (Buffer.byteLength(stdout) >= MAX_WORKER_OUTPUT_BYTES) return
-      stdout += chunk.toString("utf8")
-    })
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (Buffer.byteLength(stderr) >= MAX_WORKER_OUTPUT_BYTES) return
-      stderr += chunk.toString("utf8")
-    })
-
-    child.on("close", (code) => {
-      if (settled) return
-      if (code !== 0 && !stdout.trim()) {
-        fail("worker_failed", stderr.trim() || `Python worker exited with code ${code}`)
-        return
-      }
-
-      try {
-        const parsed = parseWorkerResult(JSON.parse(stdout.trim()))
-        finish(parsed)
-      } catch (error) {
-        fail(
-          "invalid_worker_output",
-          `${error instanceof Error ? error.message : "Python worker did not return JSON."}${stderr.trim() ? ` ${stderr.trim()}` : ""}`,
-        )
-      }
-    })
-
-    child.stdin.end(JSON.stringify(options.request))
-  })
+    return await anthropicMessages(client, config, images, prompt, request.signal)
+  } catch (error) {
+    if (error instanceof AnalyzeImageError) throw error
+    if (request.signal.aborted) throw new AnalyzeImageError("aborted", "Image analysis was cancelled.")
+    throw new AnalyzeImageError("provider_request_failed", errorText(error))
+  }
 }

@@ -1,7 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, test } from "vitest"
 
 import type { PluginInput } from "@opencode-ai/plugin"
 
@@ -13,12 +10,6 @@ import {
 } from "../src/attachments.js"
 import { DEFAULT_CONFIG } from "../src/config.js"
 import type { FileMessagePart, MessagePart } from "../src/types.js"
-
-const created: string[] = []
-
-afterEach(async () => {
-  await Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true })))
-})
 
 function filePart(id = "file-1"): FileMessagePart {
   return {
@@ -181,20 +172,13 @@ describe("session attachment resolution", () => {
     } satisfies Partial<AttachmentResolutionError>)
   })
 
-  test("materializes session data URLs only inside the private plugin cache", async () => {
-    const root = await mkdtemp(join(tmpdir(), "analyze-image-test-"))
-    created.push(root)
-    const config = structuredClone(DEFAULT_CONFIG)
-    config.runtime.cache_directory = root
-
+  test("keeps session data URLs private to the provider request", async () => {
     const references = await prepareImageReferences([filePart()], {
-      directory: root,
-      worktree: root,
-      config,
+      directory: "/project",
+      worktree: "/project",
+      config: structuredClone(DEFAULT_CONFIG),
     })
 
-    expect(references).toHaveLength(1)
-    expect(await readFile(references[0], "utf8")).toBe("hello")
-    expect(references[0]).not.toContain("base64")
+    expect(references).toEqual(["data:image/png;base64,aGVsbG8="])
   })
 })

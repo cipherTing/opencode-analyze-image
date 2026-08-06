@@ -1,8 +1,6 @@
-import { createHash, randomUUID } from "node:crypto"
-import { constants } from "node:fs"
-import { access, mkdir, readdir, rename, stat, unlink, utimes, writeFile } from "node:fs/promises"
-import { homedir, tmpdir } from "node:os"
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path"
+import { readdir, stat } from "node:fs/promises"
+import { homedir } from "node:os"
+import { basename, extname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { PluginInput } from "@opencode-ai/plugin"
@@ -10,15 +8,6 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import type { AnalyzeImageConfig, FileMessagePart, MessagePart } from "./types.js"
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"])
-
-const MIME_EXTENSIONS: Record<string, string> = {
-  "image/png": ".png",
-  "image/jpeg": ".jpg",
-  "image/webp": ".webp",
-  "image/gif": ".gif",
-  "image/bmp": ".bmp",
-  "image/tiff": ".tiff",
-}
 
 type OpenCodeClient = PluginInput["client"]
 
@@ -69,23 +58,6 @@ function expandHome(value: string): string {
   if (value === "~") return homedir()
   if (value.startsWith("~/")) return join(homedir(), value.slice(2))
   return value
-}
-
-export function cacheRoot(context: AttachmentContext): string {
-  const configured = context.config.runtime.cache_directory
-  if (configured) {
-    const expanded = expandHome(configured)
-    return isAbsolute(expanded) ? expanded : resolve(context.directory, expanded)
-  }
-  const namespace = createHash("sha256").update(context.worktree || context.directory).digest("hex").slice(0, 16)
-  const platformCache =
-    process.env.XDG_CACHE_HOME ||
-    (process.platform === "darwin"
-      ? join(homedir(), "Library", "Caches")
-      : process.platform === "win32"
-        ? process.env.LOCALAPPDATA || tmpdir()
-        : join(homedir(), ".cache"))
-  return join(platformCache, "opencode", "analyze_image", namespace)
 }
 
 function isFilePart(part: MessagePart): part is FileMessagePart {
@@ -260,55 +232,6 @@ export async function resolveSessionImageParts(
   )
 }
 
-function parseDataUrl(value: string, maxBytes: number): { mime: string; data: Buffer } {
-  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(value)
-  if (!match) throw new AttachmentResolutionError("invalid_data_url", "The image attachment data URL is invalid.")
-  const mime = match[1] || "application/octet-stream"
-  if (match[2] && Math.floor((match[3].length * 3) / 4) > maxBytes) {
-    throw new AttachmentResolutionError("image_too_large", `The image attachment exceeds ${maxBytes} bytes.`)
-  }
-  const data = match[2] ? Buffer.from(match[3], "base64") : Buffer.from(decodeURIComponent(match[3]), "utf8")
-  if (data.byteLength > maxBytes) {
-    throw new AttachmentResolutionError("image_too_large", `The image attachment exceeds ${maxBytes} bytes.`)
-  }
-  return { mime, data }
-}
-
-async function materializeDataUrl(part: FileMessagePart, context: AttachmentContext): Promise<string> {
-  const parsed = parseDataUrl(part.url, context.config.image.max_source_bytes)
-  const root = join(cacheRoot(context), "attachments")
-  await mkdir(root, { recursive: true, mode: 0o700 })
-  const extension = MIME_EXTENSIONS[parsed.mime] ?? (extname(part.filename ?? "") || ".img")
-  const digest = createHash("sha256").update(parsed.data).digest("hex")
-  const target = join(root, `${digest}${extension}`)
-  try {
-    await access(target, constants.R_OK)
-    try {
-      const now = new Date()
-      await utimes(target, now, now)
-      return target
-    } catch {
-      // If a concurrent cleanup removed it, continue with an atomic rewrite.
-    }
-  } catch {
-    // Continue with an atomic cache write.
-  }
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  await writeFile(temporary, parsed.data, { mode: 0o600, flag: "wx" })
-  try {
-    await rename(temporary, target)
-  } catch (error) {
-    try {
-      await access(target, constants.R_OK)
-      await unlink(temporary)
-    } catch {
-      await unlink(temporary).catch(() => undefined)
-      throw error
-    }
-  }
-  return target
-}
-
 function localReference(part: FileMessagePart, directory: string): string | undefined {
   if (part.url.startsWith("file:")) return fileURLToPath(part.url)
   if (part.source?.path) {
@@ -319,7 +242,7 @@ function localReference(part: FileMessagePart, directory: string): string | unde
 }
 
 async function referenceForPart(part: FileMessagePart, context: AttachmentContext): Promise<string> {
-  if (part.url.startsWith("data:")) return materializeDataUrl(part, context)
+  if (part.url.startsWith("data:")) return part.url
   if (part.url.startsWith("http://") || part.url.startsWith("https://")) return part.url
   const local = localReference(part, context.directory)
   if (local) return local
@@ -337,35 +260,4 @@ export async function prepareImageReferences(
   const selected = parts.slice(0, maximum)
   const references = await Promise.all(selected.map((part) => referenceForPart(part, context)))
   return [...new Set(references)]
-}
-
-export async function cleanupStaleCache(root: string, ttlMinutes: number): Promise<void> {
-  const cutoff = Date.now() - Math.max(ttlMinutes, 1) * 60_000
-  let entries
-  try {
-    entries = await readdir(root, { withFileTypes: true })
-  } catch {
-    return
-  }
-  await Promise.all(
-    entries.map(async (entry) => {
-      const target = join(root, entry.name)
-      if (entry.isDirectory()) {
-        await cleanupStaleCache(target, ttlMinutes)
-        return
-      }
-      if (!entry.isFile()) return
-      try {
-        const info = await stat(target)
-        if (info.mtimeMs < cutoff) await unlink(target)
-      } catch {
-        // Cache cleanup is best effort and must not interrupt a tool call.
-      }
-    }),
-  )
-}
-
-export function isManagedCachePath(path: string, root: string): boolean {
-  const value = relative(resolve(root), resolve(path))
-  return value === "" || (!value.startsWith("..") && !isAbsolute(value))
 }

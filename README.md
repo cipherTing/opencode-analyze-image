@@ -6,6 +6,19 @@
 
 ## 安装
 
+### 未发布版本
+
+在插件源码目录执行：
+
+```bash
+npm install
+npm run install:local
+```
+
+该命令会将本地插件入口安装到当前目录的 `.opencode/plugins/` 中。
+
+### 已发布版本
+
 将插件包加入现有 OpenCode 配置的 `plugin` 列表：
 
 ```json
@@ -14,16 +27,6 @@
     "opencode-analyze-image"
   ]
 }
-```
-
-安装 Python 依赖：
-
-```bash
-python3 -m venv ~/.config/opencode/analyze_image/venv
-~/.config/opencode/analyze_image/venv/bin/python -m pip install \
-  "openai>=2.53.0,<3" \
-  "anthropic>=0.120.2,<1" \
-  "Pillow>=12.3.0,<13"
 ```
 
 ## 配置
@@ -44,17 +47,13 @@ python3 -m venv ~/.config/opencode/analyze_image/venv
 
 ```json
 {
-  "version": 1,
   "trigger_models": [
     "deepseek/deepseek-v4-flash"
   ],
   "api_format": "openai_chat",
   "base_url": "https://api.openai.com/v1",
   "model": "your-vision-model",
-  "api_key_env": "ANALYZE_IMAGE_API_KEY",
-  "runtime": {
-    "python_command": "~/.config/opencode/analyze_image/venv/bin/python"
-  }
+  "api_key": "your-api-key"
 }
 ```
 
@@ -66,15 +65,9 @@ python3 -m venv ~/.config/opencode/analyze_image/venv
 | `api_format` | 接口格式，可选 `openai_chat`、`openai_responses`、`anthropic_messages`。 |
 | `base_url` | 视觉模型接口地址。 |
 | `model` | 视觉模型 ID。 |
-| `api_key_env` | API Key 对应的环境变量名。 |
+| `api_key` | 视觉模型 API Key。 |
 
 `trigger_models` 使用精确匹配。模型 ID 自身包含斜杠时，保留完整名称即可。
-
-设置 API Key：
-
-```bash
-export ANALYZE_IMAGE_API_KEY="your-api-key"
-```
 
 ### 可选字段
 
@@ -83,15 +76,6 @@ export ANALYZE_IMAGE_API_KEY="your-api-key"
 | `timeout_seconds` | `120` | 请求超时时间。 |
 | `max_retries` | `2` | 请求重试次数。 |
 | `max_output_tokens` | `4096` | 最大输出长度。 |
-| `temperature` | `null` | 模型温度。 |
-| `headers` | `{}` | 自定义请求头。 |
-| `prompt.template` | 内置提示词 | 图片分析提示词。 |
-| `openai_chat.max_tokens_parameter` | `max_tokens` | 可改为 `max_completion_tokens`。 |
-| `runtime.python_command` | `python3` 或 `python` | Python 命令或路径。 |
-| `runtime.python_args` | `[]` | Python 额外参数。 |
-| `runtime.cache_directory` | 系统缓存目录 | 缓存目录。 |
-| `runtime.cache_ttl_minutes` | `1440` | 缓存保留时间。 |
-| `runtime.worker_timeout_seconds` | `150` | 单次任务最长运行时间。 |
 
 图片相关限制配置可以直接沿用 `config.example.json` 中的默认值，只有需要调整时再修改 `image` 节点。
 

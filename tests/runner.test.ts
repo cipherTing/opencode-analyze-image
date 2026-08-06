@@ -1,25 +1,41 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 
-import { parseWorkerResult } from "../src/runner.js"
+import {
+  extractAnthropicAnalysis,
+  extractChatAnalysis,
+  extractResponsesAnalysis,
+} from "../src/runner.js"
 
-describe("worker result boundary", () => {
-  test("keeps only plain analysis text in a successful result", () => {
+describe("provider response extraction", () => {
+  test("extracts visible OpenAI chat text", () => {
     expect(
-      parseWorkerResult({
-        success: true,
-        analysis: "A red square.",
-        model: "vision-model",
-        sources: ["sample.png"],
+      extractChatAnalysis({
+        choices: [{ message: { content: "A red square." } }],
       }),
-    ).toEqual({
-      success: true,
-      analysis: "A red square.",
-    })
+    ).toBe("A red square.")
   })
 
-  test("rejects a successful worker response without text analysis", () => {
-    expect(() => parseWorkerResult({ success: true, analysis: { text: "not plain text" } })).toThrow(
-      "text analysis",
-    )
+  test("falls back to OpenAI chat reasoning text", () => {
+    expect(
+      extractChatAnalysis({
+        choices: [{ message: { content: null, reasoning_content: "The image contains a square." } }],
+      }),
+    ).toBe("The image contains a square.")
+  })
+
+  test("extracts OpenAI Responses output text", () => {
+    expect(extractResponsesAnalysis({ output_text: "A blue circle." })).toBe("A blue circle.")
+  })
+
+  test("extracts Anthropic text blocks", () => {
+    expect(
+      extractAnthropicAnalysis({
+        content: [{ type: "text", text: "A green triangle." }],
+      }),
+    ).toBe("A green triangle.")
+  })
+
+  test("rejects empty provider responses", () => {
+    expect(() => extractChatAnalysis({ choices: [] })).toThrow("no text or reasoning")
   })
 })
