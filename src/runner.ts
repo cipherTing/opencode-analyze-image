@@ -3,7 +3,7 @@ import OpenAI from "openai"
 
 import { AnalyzeImageError } from "./errors.js"
 import { prepareVisionImages, type PreparedImage } from "./vision.js"
-import type { AnalyzeImageConfig, AnalyzeImageRequest } from "./types.js"
+import type { AnalyzeImageConfig, AnalyzeImageRequest, ReasoningEffort } from "./types.js"
 
 const DEFAULT_PROMPT =
   "Describe everything visible in this image in thorough detail. Include any text, code, data, objects, people, layout, colors, and any other notable visual information."
@@ -166,7 +166,8 @@ function unsupportedChatTokenParameter(error: unknown): boolean {
   const message = errorText(error)
   return (
     (status === undefined || status === 400 || status === 422) &&
-    /(max_completion_tokens|max_tokens|unknown parameter|unsupported parameter|unrecognized request argument)/i.test(message)
+    /(max_completion_tokens|max_tokens)/i.test(message) &&
+    /(unknown|unsupported|unrecognized|unexpected|not allowed|not supported|invalid)/i.test(message)
   )
 }
 
@@ -187,6 +188,7 @@ async function openAIChat(
   const base = {
     model: config.model,
     messages: [{ role: "user", content }],
+    reasoning_effort: config.reasoning.effort,
   }
 
   try {
@@ -221,10 +223,26 @@ async function openAIResponses(
       model: config.model,
       input: [{ role: "user", content }],
       max_output_tokens: config.max_output_tokens,
+      reasoning: { effort: config.reasoning.effort },
     } as never,
     { signal },
   )
   return extractResponsesAnalysis(response)
+}
+
+function anthropicThinkingBudget(effort: ReasoningEffort): number {
+  switch (effort) {
+    case "low":
+      return 2048
+    case "medium":
+      return 8192
+    case "high":
+    case "xhigh":
+    case "max":
+      return 16384
+    case "none":
+      return 0
+  }
 }
 
 async function anthropicMessages(
@@ -241,14 +259,24 @@ async function anthropicMessages(
     ]),
     { type: "text", text: prompt },
   ]
-  const response = await client.messages.create(
-    {
-      model: config.model,
-      max_tokens: config.max_output_tokens,
-      messages: [{ role: "user", content }],
-    } as never,
-    { signal },
-  )
+  const effort = config.reasoning.effort
+  const requestBody: Record<string, unknown> = {
+    model: config.model,
+    max_tokens: config.max_output_tokens,
+    messages: [{ role: "user", content }],
+  }
+  if (effort === "none") {
+    requestBody.thinking = { type: "disabled" }
+  } else if (config.reasoning.adaptive) {
+    requestBody.thinking = { type: "adaptive", display: "summarized" }
+    requestBody.output_config = { effort }
+  } else {
+    const budget = anthropicThinkingBudget(effort)
+    requestBody.max_tokens = config.max_output_tokens + budget
+    requestBody.thinking = { type: "enabled", budget_tokens: budget }
+  }
+
+  const response = await client.messages.create(requestBody as never, { signal })
   return extractAnthropicAnalysis(response)
 }
 

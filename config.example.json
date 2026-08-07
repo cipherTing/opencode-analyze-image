@@ -6,6 +6,10 @@
   "base_url": "https://api.openai.com/v1",
   "model": "gpt-5.6",
   "api_key": "your-api-key",
+  "reasoning": {
+    "effort": "medium",
+    "adaptive": true
+  },
   "timeout_seconds": 120,
   "max_retries": 2,
   "max_output_tokens": 4096,

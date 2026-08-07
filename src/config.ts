@@ -3,7 +3,13 @@ import { constants } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
-import type { AnalyzeImageConfig, ApiFormat } from "./types.js"
+import {
+  REASONING_EFFORTS,
+  type AnalyzeImageConfig,
+  type ApiFormat,
+  type ReasoningConfig,
+  type ReasoningEffort,
+} from "./types.js"
 
 export const DEFAULT_CONFIG: AnalyzeImageConfig = {
   trigger_models: [],
@@ -11,6 +17,10 @@ export const DEFAULT_CONFIG: AnalyzeImageConfig = {
   base_url: "",
   model: "",
   api_key: "",
+  reasoning: {
+    effort: "medium",
+    adaptive: true,
+  },
   timeout_seconds: 120,
   max_retries: 2,
   max_output_tokens: 4096,
@@ -77,6 +87,26 @@ function numberValue(value: unknown, fallback: number): number {
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback
+}
+
+function reasoningEffort(value: unknown): ReasoningEffort {
+  if (value === undefined) return DEFAULT_CONFIG.reasoning.effort
+  if (typeof value !== "string" || !REASONING_EFFORTS.includes(value as ReasoningEffort)) {
+    throw new Error(`reasoning.effort must be one of: ${REASONING_EFFORTS.join(", ")}`)
+  }
+  return value as ReasoningEffort
+}
+
+function reasoningConfig(value: unknown): ReasoningConfig {
+  if (value === undefined) return { ...DEFAULT_CONFIG.reasoning }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("reasoning must be an object")
+  }
+  const root = asObject(value)
+  return {
+    effort: reasoningEffort(root.effort),
+    adaptive: booleanValue(root.adaptive, DEFAULT_CONFIG.reasoning.adaptive),
+  }
 }
 
 function triggerModels(value: unknown): string[] {
@@ -156,6 +186,7 @@ export async function loadConfigFile(path: string): Promise<AnalyzeImageConfig> 
     base_url: stringValue(root.base_url, DEFAULT_CONFIG.base_url).replace(/\/$/, ""),
     model: stringValue(root.model, DEFAULT_CONFIG.model),
     api_key: await resolveApiKey(root.api_key, path),
+    reasoning: reasoningConfig(root.reasoning),
     timeout_seconds: numberValue(root.timeout_seconds, DEFAULT_CONFIG.timeout_seconds),
     max_retries: numberValue(root.max_retries, DEFAULT_CONFIG.max_retries),
     max_output_tokens: numberValue(root.max_output_tokens, DEFAULT_CONFIG.max_output_tokens),

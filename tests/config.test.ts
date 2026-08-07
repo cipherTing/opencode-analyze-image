@@ -43,8 +43,26 @@ describe("config", () => {
     expect(config.base_url).toBe("https://api.anthropic.com")
     expect(config.model).toBe("claude-test")
     expect(config.api_key).toBe("anthropic-test-key")
+    expect(config.reasoning).toEqual({ effort: "medium", adaptive: true })
     expect(config.trigger_models).toEqual(["deepseek/deepseek-v4-flash"])
     expect(config.image.max_source_bytes).toBeGreaterThan(0)
+  })
+
+  test("validates the reasoning effort enum", async () => {
+    const root = await mkdtemp(join(tmpdir(), "analyze-image-config-"))
+    const path = join(root, "config.json")
+    await writeFile(
+      path,
+      JSON.stringify({
+        api_format: "openai_chat",
+        base_url: "https://example.test/v1",
+        model: "vision-test",
+        api_key: "test-key",
+        reasoning: { effort: "minimal" },
+      }),
+    )
+
+    await expect(loadConfigFile(path)).rejects.toThrow("reasoning.effort must be one of")
   })
 
   test("resolves api_key from an environment variable reference", async () => {

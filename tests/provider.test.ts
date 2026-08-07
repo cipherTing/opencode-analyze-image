@@ -65,8 +65,28 @@ describe("provider URL forwarding", () => {
     expect(body.value).toContain(
       "Describe everything visible in this image in thorough detail. Include any text, code, data, objects, people, layout, colors, and any other notable visual information.",
     )
+    expect(JSON.parse(body.value ?? "{}")).toMatchObject({ reasoning_effort: "medium" })
     expect(body.value).toContain("https://cdn.example.test/image.png")
     expect(body.value).not.toContain("data:image/")
+  })
+
+  test("sends reasoning effort to OpenAI Responses", async () => {
+    const body: { value?: string } = {}
+    const baseUrl = await startProviderServer({ output_text: "responses image" }, body)
+    const providerConfig = config("openai_responses", baseUrl)
+    providerConfig.reasoning.effort = "xhigh"
+
+    const result = await runAnalysis({
+      config: providerConfig,
+      request: {
+        image_urls: ["https://cdn.example.test/image.png"],
+        cwd: "/tmp",
+        signal: new AbortController().signal,
+      },
+    })
+
+    expect(result).toBe("responses image")
+    expect(JSON.parse(body.value ?? "{}")).toMatchObject({ reasoning: { effort: "xhigh" } })
   })
 
   test("forwards a remote URL to Anthropic as a URL image source", async () => {
@@ -86,7 +106,54 @@ describe("provider URL forwarding", () => {
     })
 
     expect(result).toBe("remote image")
+    expect(JSON.parse(body.value ?? "{}")).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "medium" },
+    })
     expect(body.value).toContain('"type":"url"')
     expect(body.value).toContain("https://cdn.example.test/image.png")
+  })
+
+  test("disables Anthropic thinking for none", async () => {
+    const body: { value?: string } = {}
+    const baseUrl = await startProviderServer({ content: [{ type: "text", text: "no reasoning" }] }, body)
+    const providerConfig = config("anthropic_messages", baseUrl)
+    providerConfig.reasoning.effort = "none"
+
+    const result = await runAnalysis({
+      config: providerConfig,
+      request: {
+        image_urls: ["https://cdn.example.test/image.png"],
+        cwd: "/tmp",
+        signal: new AbortController().signal,
+      },
+    })
+
+    expect(result).toBe("no reasoning")
+    expect(JSON.parse(body.value ?? "{}")).toMatchObject({ thinking: { type: "disabled" } })
+    expect(JSON.parse(body.value ?? "{}")).not.toHaveProperty("output_config")
+  })
+
+  test("uses budget-based Anthropic thinking when adaptive is disabled", async () => {
+    const body: { value?: string } = {}
+    const baseUrl = await startProviderServer({ content: [{ type: "text", text: "budget image" }] }, body)
+    const providerConfig = config("anthropic_messages", baseUrl)
+    providerConfig.reasoning.adaptive = false
+
+    const result = await runAnalysis({
+      config: providerConfig,
+      request: {
+        image_urls: ["https://cdn.example.test/image.png"],
+        cwd: "/tmp",
+        signal: new AbortController().signal,
+      },
+    })
+
+    expect(result).toBe("budget image")
+    expect(JSON.parse(body.value ?? "{}")).toMatchObject({
+      max_tokens: 12288,
+      thinking: { type: "enabled", budget_tokens: 8192 },
+    })
+    expect(JSON.parse(body.value ?? "{}")).not.toHaveProperty("output_config")
   })
 })

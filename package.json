@@ -1,6 +1,6 @@
 {
   "name": "opencode-analyze-image",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode plugin that lets text-only models analyze image attachments, URLs, files, and directories through an auxiliary vision model.",
   "author": "cipherTing",
   "repository": {
@@ -15,8 +15,13 @@
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./server": "./dist/index.js"
+    "./server": "./dist/index.js",
+    "./tui": "./dist/tui.js"
   },
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
   "files": [
     "dist",
     "config.example.json",
@@ -25,7 +30,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --external:@opencode-ai/plugin --outfile=dist/index.js",
+    "build": "npm run build:server && npm run build:tui",
+    "build:server": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --external:@opencode-ai/plugin --outfile=dist/index.js",
+    "build:tui": "esbuild src/tui.tsx --bundle --platform=node --target=node20 --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opentui/solid --external:solid-js --outfile=dist/tui.js",
     "install:local": "npm run build && node scripts/install-local.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -36,7 +43,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@opencode-ai/plugin": "^1.18.14",
-    "openai": "^7.4.0"
+    "@opentui/core": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "openai": "^7.4.0",
+    "solid-js": "^1.9.12"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

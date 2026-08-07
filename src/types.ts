@@ -1,11 +1,20 @@
 export type ApiFormat = "openai_chat" | "openai_responses" | "anthropic_messages"
 
+export const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+
+export interface ReasoningConfig {
+  effort: ReasoningEffort
+  adaptive: boolean
+}
+
 export interface AnalyzeImageConfig {
   trigger_models: string[]
   api_format: ApiFormat
   base_url: string
   model: string
   api_key: string
+  reasoning: ReasoningConfig
   timeout_seconds: number
   max_retries: number
   max_output_tokens: number
