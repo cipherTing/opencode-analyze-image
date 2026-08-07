@@ -46,6 +46,8 @@ Both paths must be built from the same committed source and must provide equival
 
 Do not publish a GitHub Release that points to a different npm version. Release assets must be reproducible from the repository and must not contain credentials.
 
+A pushed Git tag is not a GitHub Release. A release task is incomplete until `gh release view <tag>` succeeds and confirms the matching published Release exists. The Release must contain the prebuilt `analyze_image.js` asset. Never leave README or documentation download links pointing to a Release that has not been created.
+
 GitHub Packages is optional and must not be used as a second public distribution channel unless there is a specific requirement. The public npm package is the primary registry distribution.
 
 ## Documentation Rules
@@ -71,7 +73,9 @@ Before publishing a version:
 - [ ] Push the commit and tag to GitHub.
 - [ ] Publish the exact version to npm.
 - [ ] Create the matching GitHub Release and attach the prebuilt JavaScript asset.
-- [ ] Verify the published npm version and GitHub Release asset after publication.
+- [ ] Verify `npm view <package> version` reports the intended version.
+- [ ] Verify `gh release view <tag>` succeeds, the Release is published, and it contains `analyze_image.js`.
+- [ ] In the final release report, verify npm, the Git tag, the GitHub Release, and the Release asset as separate items.
 
 If npm requires an OTP or passkey, stop at that step and wait for the authorized verification. Do not bypass registry security controls or publish a different version as a workaround.
 
