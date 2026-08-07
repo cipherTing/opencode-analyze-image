@@ -8,19 +8,37 @@
 
 配置完成后，正常使用 OpenCode 即可。当模型需要识别图片时，会使用 `analyze_image`，并将结果返回到当前对话。
 
-## 使用
+## 安装
 
-在插件源码目录执行：
+选择以下任一种安装方式即可。
 
-```bash
-cd /path/to/opencode-analyze-image
-npm install
-npm run install:local ~/.config/opencode
+### npm 包
+
+在 OpenCode 配置文件中将 `opencode-analyze-image` 加入 `plugin` 数组。配置文件通常位于 `~/.config/opencode/opencode.json`：
+
+```json
+{
+  "plugin": [
+    "opencode-analyze-image"
+  ]
+}
 ```
 
-安装完成后，正常使用 OpenCode 即可。当模型需要识别图片时，会使用 `analyze_image`，并将结果返回到当前对话。
+如果已有其他插件，请追加这个条目，不要覆盖原有数组。OpenCode 启动时会安装 npm 插件，不需要拉取源码。
 
-不传路径时，插件默认安装到 `~/.config/opencode`。需要指定其他 OpenCode 根目录时，直接把路径作为 `npm run install:local` 的参数传入。
+### 预构建 JavaScript 文件
+
+从对应版本的 GitHub Release 下载 `analyze_image.js`，放入 OpenCode 的全局插件目录：
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+curl -fL https://github.com/cipherTing/opencode-analyze-image/releases/download/v0.1.1/analyze_image.js \
+  -o ~/.config/opencode/plugins/analyze_image.js
+```
+
+这种方式不需要克隆项目。如果设置了 `OPENCODE_CONFIG_DIR`，请用该目录替代 `~/.config/opencode`。
+
+完成任一种安装后，重启 OpenCode，然后正常使用即可。当模型需要识别图片时，会调用 `analyze_image`，并将结果返回到当前对话。
 
 ## 配置
 

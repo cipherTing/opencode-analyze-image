@@ -6,7 +6,7 @@ import { prepareVisionImages, type PreparedImage } from "./vision.js"
 import type { AnalyzeImageConfig, AnalyzeImageRequest } from "./types.js"
 
 const DEFAULT_PROMPT =
-  "Fully describe and explain everything visible in this image. Include visible text, people, objects, layout, colors, spatial relationships, important details, and any uncertainty."
+  "Describe everything visible in this image in thorough detail. Include any text, code, data, objects, people, layout, colors, and any other notable visual information."
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}

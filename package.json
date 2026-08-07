@@ -1,6 +1,6 @@
 {
   "name": "opencode-analyze-image",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode plugin that lets text-only models analyze image attachments, URLs, files, and directories through an auxiliary vision model.",
   "author": "cipherTing",
   "repository": {

@@ -11,9 +11,10 @@ import {
   resolveSessionImageParts,
   resolveToolInvocation,
 } from "./attachments.js"
-import { expectedConfigPath, findConfigPath, loadConfigFile } from "./config.js"
+import { expectedConfigPath, findConfigPath, loadConfigFile, loadOptionalConfig } from "./config.js"
 import { AnalyzeImageError } from "./errors.js"
 import { runAnalysis } from "./runner.js"
+import { triggerModelDescription, unlistedTriggerModelMessage } from "./trigger-models.js"
 
 function expandHome(value: string): string {
   if (value === "~") return homedir()
@@ -62,11 +63,23 @@ function toolError(error: unknown, fallbackCode = "analysis_failed"): Error {
 }
 
 async function createHooks(input: PluginInput): Promise<Hooks> {
+  let triggerModels: string[] = []
+  try {
+    triggerModels = (await loadOptionalConfig(input.directory, input.worktree)).config.trigger_models
+  } catch {
+    // Keep the tool available so execution can return the normal config error.
+  }
+
+  const description = [
+    "Analyze image content using the configured auxiliary vision model. Call this when the user asks about an attached image, when OpenCode reports that the current model cannot process image input, or when an image URL, local image path, or image directory must be inspected.",
+    triggerModelDescription(triggerModels),
+    "image_url is optional: omit it to analyze the image attached to the current conversation turn. instruction is optional: omit it for a comprehensive description, or provide a specific focus. Do not claim to have inspected an image before this tool returns.",
+  ].join("\n\n")
+
   return {
     tool: {
       analyze_image: tool({
-        description:
-          "Analyze image content using the configured auxiliary vision model. Call this when the user asks about an attached image, when OpenCode reports that the current model cannot process image input, or when an image URL, local image path, or image directory must be inspected. image_url is optional: omit it to analyze the image attached to the current conversation turn. instruction is optional: omit it for a comprehensive description, or provide a specific focus. Do not claim to have inspected an image before this tool returns.",
+        description,
         args: {
           image_url: tool.schema
             .string()
@@ -108,7 +121,7 @@ async function createHooks(input: PluginInput): Promise<Hooks> {
             throw toolError(
               new AnalyzeImageError(
                 "disabled_for_model",
-                `Model ${invocation.modelKey} is not listed in trigger_models.`,
+                unlistedTriggerModelMessage(invocation.modelKey),
               ),
             )
           }

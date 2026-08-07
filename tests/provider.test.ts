@@ -62,6 +62,9 @@ describe("provider URL forwarding", () => {
     })
 
     expect(result).toBe("remote image")
+    expect(body.value).toContain(
+      "Describe everything visible in this image in thorough detail. Include any text, code, data, objects, people, layout, colors, and any other notable visual information.",
+    )
     expect(body.value).toContain("https://cdn.example.test/image.png")
     expect(body.value).not.toContain("data:image/")
   })

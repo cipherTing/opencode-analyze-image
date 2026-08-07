@@ -8,19 +8,37 @@ Give text-only models in OpenCode the ability to understand images.
 
 After configuration, use OpenCode normally. When the model needs to inspect an image, it can call `analyze_image` and receive the result in the current conversation.
 
-## Usage
+## Installation
 
-Run the following commands from the plugin source directory:
+Choose one of the following installation methods.
 
-```bash
-cd /path/to/opencode-analyze-image
-npm install
-npm run install:local ~/.config/opencode
+### npm package
+
+Add `opencode-analyze-image` to the `plugin` array in your OpenCode configuration, usually `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": [
+    "opencode-analyze-image"
+  ]
+}
 ```
 
-After installation, use OpenCode normally. When the model needs to inspect an image, it can call `analyze_image` and return the result to the current conversation.
+Append it to an existing array instead of replacing your other plugins. OpenCode installs npm plugins when it starts. No source checkout is required.
 
-When no path is provided, the installer defaults to `~/.config/opencode`. To use another OpenCode root directory, pass its path as the argument to `npm run install:local`.
+### Prebuilt JavaScript file
+
+Download `analyze_image.js` from the GitHub Release that matches the version you want, then place it in the global OpenCode plugins directory:
+
+```bash
+mkdir -p ~/.config/opencode/plugins
+curl -fL https://github.com/cipherTing/opencode-analyze-image/releases/download/v0.1.1/analyze_image.js \
+  -o ~/.config/opencode/plugins/analyze_image.js
+```
+
+This method does not require cloning the repository. When `OPENCODE_CONFIG_DIR` is set, use that directory instead of `~/.config/opencode`.
+
+After either installation method, restart OpenCode and use it normally. When the model needs to inspect an image, it can call `analyze_image` and return the result to the current conversation.
 
 ## Configuration
 
